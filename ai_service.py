@@ -1,8 +1,8 @@
 import json
-import streamlit as st  # 引入 streamlit 库以读取环境变量
+import streamlit as st
 from openai import OpenAI
 
-# 从 Streamlit Secrets 中安全读取 API Key
+# 1. 初始化 DeepSeek 客户端（从 Streamlit Secrets 安全读取）
 client = OpenAI(
     api_key=st.secrets["DEEPSEEK_API_KEY"],
     base_url="https://api.deepseek.com"
@@ -30,21 +30,28 @@ def generate_diagnostic_quiz(grade, avg_score):
     }}
     """
     
-    response = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=[
-            {"role": "system", "content": "你是一个严格按照指定JSON格式输出的英语教研AI。"},
-            {"role": "role": "user", "content": prompt}
-        ],
-        response_format={"type": "json_object"}
-    )
-    
-    return json.loads(response.choices[0].message.content)
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "你是一个严格按照指定JSON格式输出的英语教研AI。"},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        print(f"出题 API 调用错误: {e}")
+        return {"questions": []}
 
 # 3. 收集错题并生成 5 天词汇表
 def generate_5day_vocab_plan(wrong_questions_info):
+    wrong_questions_str = "\n".join(wrong_questions_info)
+    
     prompt = f"""
-    根据学生做错的题目信息：{wrong_questions_info}，
+    根据学生做错的题目信息：
+    {wrong_questions_str}
+    
     请提取相关的中考核心高频词汇，生成一份 5 天的个性化词汇学习计划（每天2~3个词/短语，共10-15个）。
     每个单词需要包含：单词、词性、固定搭配/语法解释、1句中考真题水平的例句。
 
@@ -67,13 +74,16 @@ def generate_5day_vocab_plan(wrong_questions_info):
     }}
     """
     
-    response = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=[
-            {"role": "system", "content": "你是一个严格按照指定JSON格式输出的英语教研AI。"},
-            {"role": "user", "content": prompt}
-        ],
-        response_format={"type": "json_object"}
-    )
-    
-    return json.loads(response.choices[0].message.content)
+    try:
+        response = client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[
+                {"role": "system", "content": "你是一个严格按照指定JSON格式输出的英语教研AI。"},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        print(f"词汇表 API 调用错误: {e}")
+        return {"plan": {}}
