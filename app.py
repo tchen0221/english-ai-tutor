@@ -16,7 +16,7 @@ if "user_answers" not in st.session_state:
 if st.session_state.step == 1:
     st.header("Step 1: 个人学习档案")
     grade = st.selectbox("当前就读年级", ["初一", "初二", "初三"])
-    avg_score = st.number_input("日常英语平均分（满分120）", min_value=0, max_value=120, value=75)
+    avg_score = st.number_input("日常英语平均分（满分150）", min_value=0, max_value=150, value=75)
     
     if st.button("生成 AI 诊断测试题"):
         with st.spinner("AI 正在根据你的情况出题中..."):
