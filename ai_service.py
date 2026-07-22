@@ -1,9 +1,10 @@
 import json
+import streamlit as st  # 引入 streamlit 库以读取环境变量
 from openai import OpenAI
 
-# 1. 初始化 DeepSeek 客户端
+# 从 Streamlit Secrets 中安全读取 API Key
 client = OpenAI(
-    api_key="你的DeepSeek_API_KEY",  # 替换为你购买的 API Key
+    api_key=st.secrets["DEEPSEEK_API_KEY"],
     base_url="https://api.deepseek.com"
 )
 
