@@ -1,11 +1,12 @@
 import streamlit as st
 from ai_service import generate_diagnostic_quiz, generate_5day_vocab_plan, generate_diagnostic_report
 import db_service  # 引入新建立的数据库大管家
+import re
 
-st.set_page_config(page_title="AI 英语智能辅导", page_icon="🎓")
-st.title("🎓 初中英语 AI 智能诊断与提分系统")
+st.set_page_config(page_title="AI 英语智能辅导", page_icon="🎓", layout="wide")
+st.title("🎓 中考英语 AI 智能诊断与自适应提分系统")
 
-# 初始化所有的全局状态
+# ---------------- 初始化所有的全局状态 ----------------
 if "step" not in st.session_state:
     st.session_state.step = 1
 if "quiz_data" not in st.session_state:
@@ -14,37 +15,105 @@ if "user_answers" not in st.session_state:
     st.session_state.user_answers = {}
 if "wrong_list" not in st.session_state:
     st.session_state.wrong_list = []
-if "difficulty" not in st.session_state:
-    st.session_state.difficulty = "中等"
-# 新增：用于保存基础信息和数据库联动的 ID
-if "grade" not in st.session_state:
-    st.session_state.grade = "初一"
-if "avg_score" not in st.session_state:
-    st.session_state.avg_score = 90
 if "test_id" not in st.session_state:
     st.session_state.test_id = None
 if "vocab_plan" not in st.session_state:
     st.session_state.vocab_plan = None
+if "vocab_data" not in st.session_state:
+    st.session_state.vocab_data = None # 用于存储当前生成的 50 个考点词汇
 
-# ---------------- Step 1: 基础情况收集 ----------------
-if st.session_state.step == 1:
-    st.header("Step 1: 个人学习档案")
-    st.session_state.grade = st.selectbox("当前就读年级", ["初一", "初二", "初三"], index=["初一", "初二", "初三"].index(st.session_state.grade))
-    st.session_state.avg_score = st.number_input("日常英语平均分（满分150分）", min_value=0, max_value=150, value=st.session_state.avg_score)
+# ---------------- 侧边栏：词汇表中心 (Vocab Plan Center) ----------------
+with st.sidebar:
+    st.header("📚 词汇表中心")
+    st.info("在这里可以回看你曾经生成过的专属提分词汇表。")
     
-    if st.button("生成 AI 诊断测试卷 (已开启去重)"):
-        # 根据成绩动态划分难度
-        if st.session_state.avg_score < 90:
-            st.session_state.difficulty = "简单难度"
-        elif 90 <= st.session_state.avg_score < 120:
-            st.session_state.difficulty = "中等难度"
-        elif 120 <= st.session_state.avg_score < 140:
-            st.session_state.difficulty = "中高等难度"
-        else:
-            st.session_state.difficulty = "高等难度"
+    history_list = db_service.get_vocab_plan_history_list()
+    if history_list:
+        options = ["(请选择历史词汇表)"] + list(history_list.keys())
+        # 格式化下拉菜单显示为时间戳
+        selected_plan_id = st.selectbox(
+            "查看历史词汇表记录", 
+            options, 
+            format_func=lambda x: f"生成时间: {history_list[x]}" if x in history_list else x
+        )
+        
+        if selected_plan_id != "(请选择历史词汇表)":
+            st.success(f"当前展示词汇表生成时间：{history_list[selected_plan_id]}")
+            # 直接从数据库拉取完整的详情数据
+            try:
+                res = db_service.db.table("vocab_plans").select("*").eq("test_id", selected_plan_id).order("day_label").execute()
+                if res.data:
+                    # 按天分组展示
+                    days_data = {}
+                    for row in res.data:
+                        day = row["day_label"]
+                        if day not in days_data:
+                            days_data[day] = []
+                        days_data[day].append(row)
+                        
+                    for day, items in days_data.items():
+                        with st.expander(f"📅 {day} 历史记录", expanded=False):
+                            for item in items:
+                                item_type = "📘 单词" if item.get("type") == "word" else "📙 短语"
+                                st.markdown(f"**{item_type}：{item.get('word', '')}** {item.get('pronunciation', '')}")
+                                st.write(f"{item.get('pos_and_meaning', '')}")
+                                if item.get("variants") and item.get("variants") != "无":
+                                    st.markdown(f"🔄 **词性拓展：** `{item.get('variants', '')}`")
+                                st.info(f"💡 **中考微提示：** {item.get('micro_tip', '')}")
+                                st.write(f"🧮 **核心结构：** {item.get('formula', '')}")
+                                st.caption(f"📝 **实战微句：** {item.get('sentence', '')}")
+                                st.divider()
+            except Exception as e:
+                st.error("读取历史详情失败。")
+    else:
+        st.write("暂无历史词汇表生成记录。")
 
-        with st.spinner(f"AI 正在根据中考标准（设定难度：{st.session_state.difficulty}）并排除历史词汇，为你定制考卷..."):
-            st.session_state.quiz_data = generate_diagnostic_quiz(st.session_state.grade, st.session_state.avg_score)
+
+# ---------------- Step 1: 核心参数与模式选择 ----------------
+if st.session_state.step == 1:
+    st.header("Step 1: 定制你的专属训练模式")
+    
+    # 极简 UI：只保留词汇库和模式选择
+    vocab_bank = st.selectbox("1️⃣ 选择出题词汇库", ["初中中考词汇 (默认)"])
+    
+    st.markdown("### 2️⃣ 选择测试模式")
+    test_mode = st.radio(
+        "决定 AI 如何为你选取考核词汇：", 
+        ["🎯 错题提分特训 (优先从错题本抽词)", 
+         "🌟 全新话题诊断 (从词库抓取全新话题)", 
+         "📚 历史词汇表特训 (指定某份历史词汇表进行复测)"],
+        index=0
+    )
+    
+    train_plan_id = None
+    if test_mode.startswith("📚"):
+        if not history_list:
+            st.warning("⚠️ 你还没有生成过词汇表，请先完成一次测试并生成词汇表后，再使用此模式。")
+            st.stop()
+        else:
+            train_plan_id = st.selectbox(
+                "请选择你要复测的历史词汇表：", 
+                list(history_list.keys()), 
+                format_func=lambda x: history_list[x]
+            )
+
+    if st.button("🚀 生成 AI 专属测试卷", use_container_width=True):
+        with st.spinner("正在联动数据库调取精选词汇，AI 正在努力编撰考卷中..."):
+            # 1. 获取防重黑名单
+            blacklist = db_service.get_recent_blacklisted_words(limit=50)
+            
+            # 2. 根据模式抓取 35单词 + 15短语
+            if test_mode.startswith("🎯"):
+                st.session_state.vocab_data = db_service.get_training_vocabulary("wrong_focus", blacklist)
+            elif test_mode.startswith("🌟"):
+                st.session_state.vocab_data = db_service.get_training_vocabulary("fresh", blacklist)
+            else:
+                st.session_state.vocab_data = db_service.get_vocab_plan_by_id(train_plan_id)
+            
+            # 3. 将抓取的专属词库发给 AI 出题
+            st.session_state.quiz_data = generate_diagnostic_quiz(st.session_state.vocab_data)
+            
+            # 状态重置与推进
             st.session_state.user_answers = {}
             st.session_state.wrong_list = []
             st.session_state.test_id = None
@@ -73,11 +142,11 @@ elif st.session_state.step == 2:
         else:
             st.session_state.user_answers[q["id"]] = st.text_input(f"请输入答案：", key=f"q_{q['id']}")
     
-    if st.button("交卷并获取诊断报告"):
+    if st.button("📝 交卷并获取诊断报告", type="primary", use_container_width=True):
         st.session_state.step = 3
         st.rerun()
 
-# ---------------- Step 3: 对答案与诊断报告 ----------------
+# ---------------- Step 3: 对答案、诊断与错题闭环 ----------------
 elif st.session_state.step == 3:
     st.header("Step 3: 答题解析与诊断报告")
     quiz = st.session_state.quiz_data
@@ -85,24 +154,28 @@ elif st.session_state.step == 3:
     correct_count = 0
     total_count = len(quiz.get("questions", []))
 
-    st.subheader("📝 答案核对")
-    # 遍历核对答案并向用户展示，已修复“盲判”引起的困惑
+    st.subheader("📝 答案核对及错题入库")
     for q in quiz.get("questions", []):
         st.markdown(f"**第 {q.get('id', '*')} 题 ({q.get('category', '')})**")
-        
-        # 【Bug 修复】展现原题语境，避免学生不知道系统在判哪道题
         st.info(f"题目原文：{q.get('question', '')}")
         
         u_ans = str(st.session_state.user_answers.get(q["id"], "")).strip()
-        c_ans = str(q.get("correct_answer", "")).strip()
+        # 净化 AI 输出的标准答案（移除可能残留的标点符号）
+        c_ans = str(q.get("correct_answer", "")).strip(" .,!?")
         
-        # 简单比对逻辑
+        # 判断是词汇还是短语（包含空格视作短语）
+        item_type = "phrase" if " " in c_ans.strip() else "word"
+        
         if u_ans.lower() == c_ans.lower() or (u_ans and u_ans in c_ans):
             correct_count += 1
-            st.success(f"✅ 你的答案: {u_ans} (正确)")
+            st.success(f"✅ 你的答案: {u_ans} (正确) —— 🎉 已掌握此考点！")
+            # 【核心逻辑】：做对了，触发消灭机制，从错题本中移除
+            db_service.mark_word_as_mastered(c_ans)
         else:
-            st.error(f"❌ 你的答案: {u_ans if u_ans else '未作答'} | 正确答案: {c_ans}")
-            st.session_state.wrong_list.append(f"题型：[{q.get('category')}] 原题/考点：{q.get('question')} | 正确答案：{c_ans} | 学生错答：{u_ans}")
+            st.error(f"❌ 你的答案: {u_ans if u_ans else '未作答'} | 正确答案: {c_ans} —— ⚠️ 已自动录入错题本")
+            # 【核心逻辑】：做错了，写入未掌握错题本
+            db_service.save_wrong_question(c_ans, item_type)
+            st.session_state.wrong_list.append(f"题型：[{q.get('category')}] 考点：{q.get('question')} | 正确答案：{c_ans} | 错答：{u_ans}")
 
     st.markdown("---")
     st.subheader("📊 综合能力诊断报告 (各维度满分10分)")
@@ -111,61 +184,68 @@ elif st.session_state.step == 3:
         report_text = report_data.get("report", "报告生成完成。")
         st.info(report_text)
         
-        # 【数据库接入】保存本次测试成绩，生成唯一 test_id
         if not st.session_state.test_id:
+            # 兼容保存记录，由于移除了 grade/score 参数，这里填入占位符
             st.session_state.test_id = db_service.save_test_record(
-                grade=st.session_state.grade,
-                score=st.session_state.avg_score,
-                difficulty=st.session_state.difficulty,
+                grade="初中通用",
+                score=0, 
+                difficulty="自适应模式",
                 correct_count=correct_count,
                 total_count=total_count,
                 report_json=report_data
             )
 
-    # 提供进入复习单词阶段的按钮
     st.markdown("---")
-    st.write("诊断看完啦？让我们针对你的错题，生成专属的词汇复习计划！云端已就绪，支持一键排版导出，方便带去学校复习。")
-    if st.button("🚀 生成 5 天提分词汇表"):
+    st.write("🎯 **诊断完成！** 刚刚犯错的知识点都已经进入了你的云端错题本。现在，让我们把本轮测试的核心词汇打包成 5 天的复习计划吧！")
+    if st.button("🚀 根据本轮考点，生成 5 天精准复习词汇表", type="primary", use_container_width=True):
         st.session_state.step = 4
         st.rerun()
 
 # ---------------- Step 4: 5天提分词汇表 ----------------
 elif st.session_state.step == 4:
-    st.header("Step 4: 专属 5 天提分词汇表")
+    st.header("Step 4: 专属 5 天 (35词+15短语) 提分词汇表")
     
-    # 【Bug 修复】加入 Try-Except 和判空逻辑，拦截 AI 静默崩溃
     if not st.session_state.vocab_plan:
         try:
-            with st.spinner("正在结合错题与历史数据，生成中..."):
-                vocab_plan = generate_5day_vocab_plan(st.session_state.wrong_list, st.session_state.difficulty)
+            with st.spinner("正在按照 [7单词 + 3短语] 的严苛标准生成专属排版中，请稍候..."):
+                # 注意：这里我们使用刚才在 Step 1 抓好并考查过的 50 个核心词汇发给 AI 生成复习排版
+                plan_vocab_data = st.session_state.vocab_data
+                
+                # 如果因为某种原因没抓到，触发紧急补救抓取
+                if not plan_vocab_data:
+                    plan_vocab_data = db_service.get_training_vocabulary("wrong_focus", db_service.get_recent_blacklisted_words(50))
+                
+                vocab_plan = generate_5day_vocab_plan(plan_vocab_data)
                 
                 if not vocab_plan or "plan" not in vocab_plan:
                     raise ValueError("AI 返回了无法解析的空数据格式。")
                 
                 st.session_state.vocab_plan = vocab_plan
                 
-                # 【数据库接入】后台静默保存生成的词汇表，关联刚才的测试成绩
                 if st.session_state.test_id:
                     db_service.save_vocab_plan(st.session_state.test_id, vocab_plan)
                     
         except Exception as e:
-            st.error(f"⚠️ AI 生成中断，请点击下方按钮重新生成。报错详情：{e}")
-            if st.button("🔄 重新尝试生成词汇表"):
+            st.error(f"⚠️ AI 生成排版时中断，请点击下方按钮重新生成。报错详情：{e}")
+            if st.button("🔄 重新尝试生成排版"):
                 st.rerun()
-            st.stop() # 阻止代码往下运行渲染空页面
+            st.stop()
 
-    st.success(f"生成成功！已自动存入云端数据库，你可以随时导出并打印纸质版。\n\n"
-               f"本次生成已根据水平（{st.session_state.difficulty}）滤除了已掌握词汇，严格遵循了 4 短语 + 6 单词结构！")
+    # 此处利用 datetime 动态获取当前时间展示给用户看 (仅前端展示，数据库有真正的 created_at)
+    from datetime import datetime
+    current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    
+    st.success(f"✅ 生成成功！当前生成时间：**{current_time_str}**\n\n"
+               f"计划已自动存入云端，你随时可以在左侧【词汇表中心】回看。内容严格遵循了每日 7 单词 + 3 短语结构！")
 
     plan = st.session_state.vocab_plan.get("plan", {})
     for day, items in plan.items():
         with st.expander(f"📅 {day} 学习任务", expanded=True):
             for item in items:
-                # 区分词汇和短语的不同展示
+                # 区分词汇和短语的不同展示，强制维持原格式！
                 item_type = "📘 单词" if item.get("type") == "word" else "📙 短语"
                 st.markdown(f"### {item_type}：**{item.get('word', '')}** {item.get('pronunciation', '')} `[{item.get('pos', '')}]` {item.get('meaning', '')}")
                 
-                # 展示词性变体
                 if item.get("variants") and item.get("variants") != "无":
                     st.markdown(f"🔄 **词性拓展：** `{item.get('variants', '')}`")
                 
@@ -175,9 +255,10 @@ elif st.session_state.step == 4:
                 st.divider()
 
     st.markdown("---")
-    if st.button("重新开启一轮新测试"):
+    if st.button("🔁 开启一轮新测试", use_container_width=True):
         st.session_state.step = 1
         st.session_state.quiz_data = None
         st.session_state.vocab_plan = None
         st.session_state.test_id = None
+        st.session_state.vocab_data = None
         st.rerun()
