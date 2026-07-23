@@ -154,46 +154,65 @@ elif st.session_state.step == 3:
     correct_count = 0
     total_count = len(quiz.get("questions", []))
 
-    st.subheader("📝 答案核对及错题入库")
+    st.subheader("📝 答案核对")
+    
+    # 【逻辑变更】：先用 Python 列表把要处理的词存在内存里
+    mastered_words_to_update = []
+    wrong_words_to_save = []
+
     for q in quiz.get("questions", []):
         st.markdown(f"**第 {q.get('id', '*')} 题 ({q.get('category', '')})**")
         st.info(f"题目原文：{q.get('question', '')}")
         
         u_ans = str(st.session_state.user_answers.get(q["id"], "")).strip()
-        # 净化 AI 输出的标准答案（移除可能残留的标点符号）
-        c_ans = str(q.get("correct_answer", "")).strip(" .,!?")
+        raw_c_ans = str(q.get("correct_answer", "")).strip(" .,!?")
         
-        # 判断是词汇还是短语（包含空格视作短语）
-        item_type = "phrase" if " " in c_ans.strip() else "word"
+        import re
+        acceptable_answers = [a.strip().lower() for a in re.split(r'[/,，、]', raw_c_ans) if a.strip()]
+        u_ans_clean = u_ans.lower()
         
-        if u_ans.lower() == c_ans.lower() or (u_ans and u_ans in c_ans):
+        is_correct = False
+        if u_ans_clean:
+            for cand in acceptable_answers:
+                if u_ans_clean == cand or (u_ans_clean in cand and len(u_ans_clean) >= 2) or (cand in u_ans_clean and len(cand) >= 2):
+                    is_correct = True
+                    break
+        
+        primary_word = acceptable_answers[0] if acceptable_answers else raw_c_ans
+        item_type = "phrase" if " " in primary_word else "word"
+        
+        if is_correct:
             correct_count += 1
-            st.success(f"✅ 你的答案: {u_ans} (正确) —— 🎉 已掌握此考点！")
-            # 【核心逻辑】：做对了，触发消灭机制，从错题本中移除
-            db_service.mark_word_as_mastered(c_ans)
+            st.success(f"✅ 你的答案: {u_ans} (正确) | 参考答案: {raw_c_ans}")
+            mastered_words_to_update.append(primary_word)
         else:
-            st.error(f"❌ 你的答案: {u_ans if u_ans else '未作答'} | 正确答案: {c_ans} —— ⚠️ 已自动录入错题本")
-            # 【核心逻辑】：做错了，写入未掌握错题本
-            db_service.save_wrong_question(c_ans, item_type)
-            st.session_state.wrong_list.append(f"题型：[{q.get('category')}] 考点：{q.get('question')} | 正确答案：{c_ans} | 错答：{u_ans}")
+            st.error(f"❌ 你的答案: {u_ans if u_ans else '未作答'} | 正确答案: {raw_c_ans}")
+            wrong_words_to_save.append((primary_word, item_type))
+            st.session_state.wrong_list.append(f"题型：[{q.get('category')}] 考点：{q.get('question')} | 正确答案：{raw_c_ans} | 错答：{u_ans}")
 
     st.markdown("---")
     st.subheader("📊 综合能力诊断报告 (各维度满分10分)")
-    with st.spinner("正在生成多维度打分与诊断报告，并同步至云端..."):
+    with st.spinner("正在生成诊断报告，并同步测试记录至云端..."):
         report_data = generate_diagnostic_report(st.session_state.wrong_list, correct_count, total_count)
-        report_text = report_data.get("report", "报告生成完成。")
-        st.info(report_text)
+        st.info(report_data.get("report", "报告生成完成。"))
         
+        # 【逻辑变更】：先生成 test_id
         if not st.session_state.test_id:
-            # 兼容保存记录，由于移除了 grade/score 参数，这里填入占位符
             st.session_state.test_id = db_service.save_test_record(
-                grade="初中通用",
-                score=0, 
-                difficulty="自适应模式",
-                correct_count=correct_count,
-                total_count=total_count,
+                grade="初中通用", score=0, difficulty="自适应模式",
+                correct_count=correct_count, total_count=total_count,
                 report_json=report_data
             )
+            
+    # 【逻辑变更】：拿到 test_id 后，统一执行错题本的数据库写入！
+    if st.session_state.test_id:
+        for word in mastered_words_to_update:
+            db_service.mark_word_as_mastered(word)
+        for word, i_type in wrong_words_to_save:
+            # 现在我们有 test_id 可以传给错题库了！
+            db_service.save_wrong_question(st.session_state.test_id, word, i_type)
+        
+        st.success("☁️ 考点状态与错题数据已成功同步至云端错题本！")
 
     st.markdown("---")
     st.write("🎯 **诊断完成！** 刚刚犯错的知识点都已经进入了你的云端错题本。现在，让我们把本轮测试的核心词汇打包成 5 天的复习计划吧！")
