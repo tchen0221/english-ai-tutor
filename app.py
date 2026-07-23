@@ -39,6 +39,15 @@ with st.sidebar:
         
         if selected_plan_id != "(请选择历史词汇表)":
             st.success(f"当前展示词汇表生成时间：{history_list[selected_plan_id]}")
+            
+            # ---------------- 👇 新增：一键删除按钮 👇 ----------------
+            if st.button("🗑️ 删除此词汇表记录", use_container_width=True):
+                if db_service.delete_vocab_plan(selected_plan_id):
+                    st.toast("✅ 词汇表已成功删除！", icon="🎉")
+                    st.rerun() # 重新加载页面，自动刷新下拉列表
+                else:
+                    st.error("❌ 删除失败，请检查数据库连接。")
+            # ---------------- 👆 新增结束 👆 ----------------
             # 直接从数据库拉取完整的详情数据
             try:
                 res = db_service.db.table("vocab_plans").select("*").eq("test_id", selected_plan_id).order("day_label").execute()
