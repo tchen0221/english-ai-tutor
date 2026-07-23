@@ -134,18 +134,26 @@ def get_training_vocabulary(mode="fresh", blacklist=None):
         "phrases": selected_phrases
     }
 
-# 7. 【新增】错题写入机制
-def save_wrong_question(word, item_type="word"):
+# 7. 【修改】错题写入机制：新增 test_id 绑定，支持级联删除
+def save_wrong_question(test_id, word, item_type="word"):
     try:
         # 先查存不存在
         existing = db.table("wrong_questions").select("id, status").eq("word", word).execute()
         if not existing.data:
-            # 没存过，直接写入未掌握
-            db.table("wrong_questions").insert({"word": word, "type": item_type, "status": "unmastered"}).execute()
+            # 没存过，直接写入未掌握，并绑定本次测试卷的 test_id
+            db.table("wrong_questions").insert({
+                "test_id": test_id,
+                "word": word, 
+                "type": item_type, 
+                "status": "unmastered"
+            }).execute()
         else:
             # 存过但之前做对了(mastered)，重新打回未掌握(unmastered)
             if existing.data[0]["status"] == "mastered":
-                db.table("wrong_questions").update({"status": "unmastered"}).eq("word", word).execute()
+                db.table("wrong_questions").update({
+                    "test_id": test_id, # 更新时关联到最新一次错的卷子
+                    "status": "unmastered"
+                }).eq("word", word).execute()
     except Exception as e:
         print(f"保存错题失败: {e}")
 
