@@ -191,3 +191,12 @@ def get_vocab_plan_by_id(test_id):
     except Exception as e:
         print(f"读取历史词汇表详情失败: {e}")
         return {"words": [], "phrases": []}
+
+# 11. 【新增】删除指定的历史词汇表
+def delete_vocab_plan(test_id):
+    try:
+        db.table("vocab_plans").delete().eq("test_id", test_id).execute()
+        return True
+    except Exception as e:
+        print(f"删除词汇表失败: {e}")
+        return False
