@@ -255,7 +255,17 @@ elif st.session_state.step == 3:
                     is_correct = True
                     break
         
-        primary_word = acceptable_answers[0] if acceptable_answers else raw_c_ans
+        # 👇 【核心升级：AI 溯源考点提取】(完美解决“off”和“中文”入库的漏洞)
+        tested_word_from_ai = q.get("tested_word", "").strip()
+        
+        if tested_word_from_ai:
+            primary_word = tested_word_from_ai
+        else:
+            # 如果 AI 偶尔漏了，启动完美兜底逻辑
+            if "英译中" in q.get("category", ""):
+                primary_word = q.get("question").strip() # 英译中的英文在题干里
+            else:
+                primary_word = acceptable_answers[0] if acceptable_answers else raw_c_ans
         
         # 👇 【新增拦截逻辑】：如果答案是一个长句子 (超过 4 个单词或过长字符)，不作为错题单词存入数据库
         is_sentence = len(primary_word.split()) > 4 or len(primary_word) > 30
