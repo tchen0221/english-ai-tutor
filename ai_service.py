@@ -1,12 +1,18 @@
 import json
 import re
+import os
 import streamlit as st
 from openai import OpenAI
 import concurrent.futures
 
+# 👇 安全获取密钥：优先读取 Sealos 环境变量，如果为空再读取本地 secrets.toml
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+if not DEEPSEEK_API_KEY:
+    DEEPSEEK_API_KEY = st.secrets["DEEPSEEK_API_KEY"]
+
 # 初始化 DeepSeek 客户端
 client = OpenAI(
-    api_key=st.secrets["DEEPSEEK_API_KEY"],
+    api_key=DEEPSEEK_API_KEY,
     base_url="https://api.deepseek.com"
 )
 
