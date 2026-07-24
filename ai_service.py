@@ -72,6 +72,12 @@ def generate_module_1(vocab_data):
     如果有多种翻译或近义词，请用斜杠 '/' 隔开，例如 "成年人/成人"。
     绝对不能包含任何标点符号或解析说明。
 
+    【强制新增字段：tested_word (溯源考点)】(极其重要！)
+    在每一题的 JSON 中，必须新增一个 `tested_word` 字段。它代表这道题实际上是在考查我提供的词库中的哪一个原始单词。
+    这个词必须**原封不动**地从我提供的词汇表里复制，绝不能变形或拼错！
+    - 如果是中译英，`tested_word` 就是英文答案。
+    - 如果是英译中（答案是中文），`tested_word` 必须是题干里的英文。
+
     【输出JSON结构要求】：
     请将 10 道题平铺为一维的 "questions" 数组，type 全部为 "text"。
     必须严格输出以下 JSON 格式示例：
@@ -81,7 +87,15 @@ def generate_module_1(vocab_data):
                 "category": "中译英",
                 "type": "text",
                 "question": "环境",
-                "correct_answer": "environment"
+                "correct_answer": "environment",
+                "tested_word": "environment"
+            }},
+            {{
+                "category": "英译中",
+                "type": "text",
+                "question": "education",
+                "correct_answer": "教育",
+                "tested_word": "education"
             }}
         ]
     }}
@@ -125,6 +139,12 @@ def generate_module_2(vocab_data):
     JSON 中的 `correct_answer` 字段必须且只能包含最终供程序比对的纯文本答案！
     如果是翻译题存在缩写差异（如 He is / He's），请用斜杠 '/' 隔开提供多解。绝对不能包含任何标点符号(除翻译题的句末标点外)或解析说明。
 
+    【强制新增字段：tested_word (溯源考点)】(极其重要！)
+    在每一题的 JSON 中，必须新增一个 `tested_word` 字段。它代表这道题实际上是在考查我提供的词库中的哪一个原始单词或短语。
+    - 如果是固定搭配挖空，`tested_word` 必须填该题考查的完整短语。
+    - 如果是词汇变形，`tested_word` 必须填原始词库给的单词原形。
+    - 如果是句子翻译，`tested_word` 必须填该句提示的【核心短语】。
+
     【输出JSON结构要求】：
     请将 12 道题平铺为一个一维的 "questions" 数组。
     必须严格输出以下 JSON 格式：
@@ -134,19 +154,22 @@ def generate_module_2(vocab_data):
                 "category": "词汇变形",
                 "type": "text",
                 "question": "He is a very ______ (care) person.",
-                "correct_answer": "careful"
+                "correct_answer": "careful",
+                "tested_word": "care"
             }},
             {{
                 "category": "固定搭配",
                 "type": "text",
                 "question": "查明；弄清 (find ______)",
-                "correct_answer": "out"
+                "correct_answer": "out",
+                "tested_word": "find out"
             }},
             {{
                 "category": "翻译句子",
                 "type": "text",
                 "question": "他习惯于早起。(提示: be used to)",
-                "correct_answer": "He is used to getting up early./He's used to getting up early."
+                "correct_answer": "He is used to getting up early./He's used to getting up early.",
+                "tested_word": "be used to"
             }}
         ]
     }}
@@ -175,6 +198,9 @@ def generate_module_3(vocab_data):
         2. 挖空规则：严格5处，按序标记 ___1___ 至 ___5___。正确答案原词绝不可在上下文中明文出现。
         3. 选项致命规则（防多解）：4个选项词性必须一致。结合上下文必须【唯一通顺】。干扰项绝对不能是近义词或存在包含关系（如：答案是star，干扰项绝不能有sun/light/moon）！
 
+        【强制新增字段：tested_word (溯源考点)】
+        在每题的 JSON 中新增 `tested_word` 字段。代表这处挖空考查我提供的词库中的哪个原词或短语。即使答案是变形词或短语的一部分，`tested_word` 也必须原封不动填我提供的原词。
+
         【严格JSON输出】（只输出纯JSON，必须完整包含5题）
         {{
             "passage": "包含 ___1___ 到 ___5___ 的完整文章",
@@ -182,7 +208,8 @@ def generate_module_3(vocab_data):
                 {{
                     "id": 1,
                     "options": ["A. xxx", "B. xxx", "C. xxx", "D. xxx"],
-                    "answer": "xxx" 
+                    "answer": "xxx",
+                    "tested_word": "原词或短语"
                 }}
             ]
         }}
@@ -202,13 +229,17 @@ def generate_module_3(vocab_data):
            - 【带提示词】3处：格式为 ___6___ (care)。分别考查：动词时态/语态(1处)、名词复数/词性转换(1处)、形容/副词变形(1处)。
            - 【无提示词】2处：格式为 ___9___。只能考查【介词、连词或固定搭配】。绝对禁止考查名词或动词，确保全国统一虚词解！
 
+        【强制新增字段：tested_word (溯源考点)】
+        在每题的 JSON 中新增 `tested_word` 字段。代表这处挖空考查我提供的词库中的哪个原词或短语。即使答案是变形词或短语的一部分，`tested_word` 也必须原封不动填我提供的原词。
+
         【严格JSON输出】（只输出纯JSON，必须完整包含5题）
         {{
             "passage": "包含 ___6___ 到 ___10___ 的完整文章（带提示词需带括号）",
             "questions": [
                 {{
                     "id": 6,
-                    "answer": "xxx"
+                    "answer": "xxx",
+                    "tested_word": "原词或短语"
                 }}
             ]
         }}
@@ -237,7 +268,8 @@ def generate_module_3(vocab_data):
                     "context": cloze_data.get("passage", "") if i == 0 else "",
                     "question": f"第 {q['id']} 处填空",
                     "options": q.get("options", []),
-                    "correct_answer": q.get("answer", "")
+                    "correct_answer": q.get("answer", ""),
+                    "tested_word": q.get("tested_word", "")  # 👈 新增提取溯源词
                 })
 
         # 组装短文填空 (只在第 1 题展示文章)
@@ -248,7 +280,8 @@ def generate_module_3(vocab_data):
                     "type": "text",
                     "context": short_data.get("passage", "") if i == 0 else "",
                     "question": f"第 {q['id']} 处填空",
-                    "correct_answer": q.get("answer", "")
+                    "correct_answer": q.get("answer", ""),
+                    "tested_word": q.get("tested_word", "")  # 👈 新增提取溯源词
                 })
                 
         return {"questions": final_questions}
