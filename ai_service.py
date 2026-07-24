@@ -2,6 +2,7 @@ import json
 import re
 import streamlit as st
 from openai import OpenAI
+import concurrent.futures
 
 # 初始化 DeepSeek 客户端
 client = OpenAI(
@@ -138,66 +139,110 @@ def generate_module_2(vocab_data):
         return {"questions": []}
 
 # ==============================================================================
-# 模块三：语篇综合实战关 (10 题)
+# 模块三：语篇综合实战关 (10 题) - 拆分并行版
 # ==============================================================================
 def generate_module_3(vocab_data):
     words_str = ", ".join(vocab_data.get("words", []))
     phrases_str = ", ".join(vocab_data.get("phrases", []))
     
-    prompt = f"""
-    你是一位资深且严格遵循中考英语出题考核标准的教研专家。请基于我提供的【专属核心词库】，设计一张【模块三：语篇阅读实战卷】。
-    
-    【出题最高限制指令：限定弹药库】
-    本次测试的挖空考点必须且只能从以下提供的词汇和短语中挑选：
-    - 核心单词 (Words): [{words_str}]
-    - 核心短语 (Phrases): [{phrases_str}]
-    绝对不允许考查上述列表之外的词汇作为挖空重点！
+    # --- 内部函数 1：独立生成完形填空 ---
+    def _generate_cloze():
+        prompt = f"""
+        你是一位资深福建中考英语命题专家。请生成 1 篇完形填空试题。
 
-    【题型与数量严格要求（共计 10 题，绝不可多出或少出）】：
-    
-    1. [完形填空] (前 5 题) 请生成 1 篇符合中国中考英语标准难度的完形填空。
-    1.1 文本要求：篇幅 150-180 词（记叙文/生动小故事，包含“起因-经过-转折-感悟”）。风格生动自然，严禁写空洞流水账。首句必须完整，严禁挖空。
-    1.2 挖空与逻辑要求（挖空 5 处，标记 ___1___ 到 ___5___）：
-       - ⚠️ 严禁“明文泄题”：正确答案词绝对不能在上下文中直接出现！
-       - ⚠️ 必须“上下文锁死”：凭单个句子无法直接选出答案，必须结合情节发展才能推断出逻辑唯一解。
-       - ⚠️ 纯粹考查实词辨析：4 个选项必须词性相同、语法均通顺。
-    1.3 格式：包含 type="radio" 和 "options" 数组。文章放在第 1 题的 "context" 字段中。
+        【限定弹药库】
+        本次测试的答案考点必须优先从以下词汇中挑选：
+        - 核心单词: [{words_str}]
+        - 核心短语: [{phrases_str}]
 
-    2. [短文填空] (后 5 题) 请生成 1 篇符合中国中考英语标准难度的短文语法填空。
-    2.1 文本要求：篇幅 130-160 词（主题围绕生活体验/小启发）。挖空需均匀分布，严禁连续两句都有挖空。
-    2.2 考点分布公式（严格按此比例挖空 5 处，标记 ___6___ 到 ___10___）：
-       - 3 处带提示词（考查词性转换/语法变形）：1处动词时态/语态；1处名词复数/词性转换；1处形容词/副词比较级。
-       - 2 处无提示词（考查虚词）：1处介词/固定搭配；1处连词/引导词。
-    2.3 格式：带提示词的格式：___6___ (give)；无提示词格式：___7___。文章放在第 6 题的 "context" 字段中。
+        【核心要求】
+        1. 篇幅150-180词，完整故事情节（起因-冲突-解决-感悟）。首句必须完整，严禁挖空。
+        2. 挖空 5 处（编号 1 到 5），标记为 ___1___。
+        3. 上下文强锁死：单看所在句应有多个选项通顺，但结合上下文情节，【必须有且仅有 1 个】合乎逻辑的答案。
+        4. 严禁明文泄题，正确答案原词不可在上下文中出现。四个选项词性必须严格一致。
 
-    【阅卷强约束：答案纯净度】
-    JSON 中的 `correct_answer` 必须是纯文本答案（如 "careful"）。绝对不要带标点或前缀字母。
-
-    【输出JSON结构要求】：
-    为了前端渲染，将这 10 道题平铺为一个一维的 "questions" 数组。
-    必须严格输出以下 JSON 格式示例：
-    {{
-        "questions": [
-            {{
-                "category": "完形填空",
-                "type": "radio",
-                "context": "Once upon a time... ___1___ ...",
-                "question": "第 1 处填空",
-                "options": ["A. happy", "B. sad", "C. angry", "D. tired"],
-                "correct_answer": "happy"
-            }},
-            {{
-                "category": "短文填空",
-                "type": "text",
-                "context": "This is a new story... ___6___ (protect)...",
-                "question": "第 6 处填空",
-                "correct_answer": "protecting"
-            }}
-        ]
-    }}
-    """
-    try:
+        【输出JSON格式严格要求】（只输出纯JSON，不要解析说明，注意答案必须是选项里的单词纯文本）
+        {{
+            "passage": "短文正文，包含 ___1___ 到 ___5___",
+            "questions": [
+                {{
+                    "id": 1,
+                    "options": ["A. happy", "B. sad", "C. angry", "D. tired"],
+                    "answer": "happy" 
+                }}
+            ]
+        }}
+        """
         return _call_deepseek_with_retry(prompt)
+
+    # --- 内部函数 2：独立生成短文填空 ---
+    def _generate_short_text():
+        prompt = f"""
+        你是一位资深福建中考英语命题专家。请生成 1 篇短文语法填空试题。
+
+        【限定弹药库】
+        本次测试的考点必须优先从以下词汇中挑选：
+        - 核心单词: [{words_str}]
+        - 核心短语: [{phrases_str}]
+
+        【核心要求】
+        1. 篇幅130-160词，主题围绕生活启发/科普。挖空必须均匀分布，严禁连续两句挖空。
+        2. 严格挖空 5 处（编号 6 到 10）。
+        3. 考点公式硬性要求（必须严格遵守！）：
+           - 【带提示词】3 处：必须在括号内给原形，如 ___6___ (care)。1处动词时态/语态，1处名词复数/词性转换，1处形容词/副词比较级或转换。
+           - 【无提示词】2 处：无括号，如 ___9___。只能考查【介词】、【连词】或【固定搭配】。严禁考无提示词的名词或动词，必须保证全国考生只能填出唯一虚词解！
+
+        【输出JSON格式严格要求】（只输出纯JSON，答案直接给纯文本）
+        {{
+            "passage": "短文正文，带提示词示例 ___6___ (care)；无提示词示例 ___9___",
+            "questions": [
+                {{
+                    "id": 6,
+                    "answer": "careful"
+                }}
+            ]
+        }}
+        """
+        return _call_deepseek_with_retry(prompt)
+
+    # ==========================================
+    # 多线程并行调用 (核心优化点：提速 50% 以上)
+    # ==========================================
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            future_cloze = executor.submit(_generate_cloze)
+            future_short = executor.submit(_generate_short_text)
+            
+            cloze_data = future_cloze.result()
+            short_data = future_short.result()
+            
+        final_questions = []
+
+        # 组装前端需要的 完形填空 格式
+        if cloze_data and "questions" in cloze_data:
+            for q in cloze_data["questions"]:
+                final_questions.append({
+                    "category": "完形填空",
+                    "type": "radio",
+                    "context": cloze_data.get("passage", ""),
+                    "question": f"第 {q['id']} 处填空",
+                    "options": q.get("options", []),
+                    "correct_answer": q.get("answer", "")
+                })
+
+        # 组装前端需要的 短文填空 格式
+        if short_data and "questions" in short_data:
+            for q in short_data["questions"]:
+                final_questions.append({
+                    "category": "短文填空",
+                    "type": "text",
+                    "context": short_data.get("passage", ""),
+                    "question": f"第 {q['id']} 处填空",
+                    "correct_answer": q.get("answer", "")
+                })
+                
+        return {"questions": final_questions}
+
     except Exception as e:
         print(f"模块三生成错误: {e}")
         return {"questions": []}
