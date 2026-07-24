@@ -200,3 +200,65 @@ def delete_vocab_plan(test_id):
     except Exception as e:
         print(f"删除词汇表失败: {e}")
         return False
+
+# 12. 专门为 Step 4 生成复习词汇表设计的抓词逻辑
+def get_review_vocabulary(current_test_words=None):
+    if current_test_words is None:
+        current_test_words = []
+        
+    words_needed = 35
+    phrases_needed = 15
+    
+    selected_words = []
+    selected_phrases = []
+    
+    # 1. 从错题库抓取 unmastered 状态的词，并过滤掉长句子
+    try:
+        res = db.table("wrong_questions").select("word, type").eq("status", "unmastered").execute()
+        unmastered = res.data if res.data else []
+        random.shuffle(unmastered)
+        
+        for item in unmastered:
+            w = item["word"].strip()
+            # 过滤逻辑：超过 4 个单词或长度超过 30 字符的，视为整句翻译，直接排除！
+            if len(w.split()) > 4 or len(w) > 30:
+                continue
+                
+            if item["type"] == "word" and len(selected_words) < words_needed:
+                if w not in selected_words:
+                    selected_words.append(w)
+            elif item["type"] == "phrase" and len(selected_phrases) < phrases_needed:
+                if w not in selected_phrases:
+                    selected_phrases.append(w)
+    except Exception as e:
+        print(f"读取错题库生成复习表失败: {e}")
+
+    # 2. 计算缺额
+    missing_words = words_needed - len(selected_words)
+    missing_phrases = phrases_needed - len(selected_phrases)
+    
+    # 3. 如果错题不够 (或短语不够)，从全新的 Topic Pool 中抓取补充 (避开本次测试用过的词)
+    if missing_words > 0 or missing_phrases > 0:
+        try:
+            # 排除黑名单：包含近期黑名单 + 本次测试词 + 已经选上的错题
+            blacklist = get_recent_blacklisted_words(limit=50)
+            exclude_set = set(blacklist + current_test_words + selected_words + selected_phrases)
+            
+            topics = get_random_topics(3)
+            res = db.table("vocabulary_bank").select("word, type").in_("topic", topics).execute()
+            
+            bank_items = [row for row in res.data if row["word"] not in exclude_set]
+            random.shuffle(bank_items)
+            
+            b_words = [row["word"] for row in bank_items if row["type"] == "word" and len(row["word"].split()) <= 4]
+            b_phrases = [row["word"] for row in bank_items if row["type"] == "phrase" and len(row["word"].split()) <= 4]
+            
+            selected_words.extend(b_words[:missing_words])
+            selected_phrases.extend(b_phrases[:missing_phrases])
+        except Exception as e:
+            print(f"补充全新话题词汇失败: {e}")
+            
+    return {
+        "words": selected_words,
+        "phrases": selected_phrases
+    }
