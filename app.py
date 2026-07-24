@@ -1,12 +1,11 @@
 import streamlit as st
-# 提前为你预留了分模块的引入，等一会儿修改 ai_service.py 时我们会实现这三个新函数
 from ai_service import generate_module_1, generate_module_2, generate_module_3, generate_5day_vocab_plan, generate_diagnostic_report
-import db_service  # 引入新建立的数据库大管家
+import db_service  # 引入新建立的数据库
 import re
 import concurrent.futures
 
 st.set_page_config(page_title="AI 英语智能辅导", page_icon="🎓", layout="wide")
-st.title("🎓 中考英语 AI 智能诊断与自适应提分系统")
+st.title("🎓 英语 AI 智能诊断与自适应提分系统")
 
 # ---------------- 初始化所有的全局状态 ----------------
 if "step" not in st.session_state:
