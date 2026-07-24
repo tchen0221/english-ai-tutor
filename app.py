@@ -110,7 +110,7 @@ if st.session_state.step == 1:
             )
 
     if st.button("🚀 生成 AI 专属测试卷", use_container_width=True):
-        with st.spinner("正在联动数据库调取精选词汇，AI 正在努力编撰考卷中（分模块生成中）..."):
+        with st.spinner("正在联动数据库调取精选词汇，AI 正在努力编撰考卷中（分模块并发生成中）..."):
             # 1. 获取防重黑名单
             blacklist = db_service.get_recent_blacklisted_words(limit=50)
             
@@ -233,7 +233,7 @@ elif st.session_state.step == 3:
     correct_count = 0
     total_count = len(quiz.get("questions", []))
 
-    st.subheader("📝 答案核提")
+    st.subheader("📝 答案核对")
     
     mastered_words_to_update = []
     wrong_words_to_save = []
@@ -256,15 +256,23 @@ elif st.session_state.step == 3:
                     break
         
         primary_word = acceptable_answers[0] if acceptable_answers else raw_c_ans
+        
+        # 👇 【新增拦截逻辑】：如果答案是一个长句子 (超过 4 个单词或过长字符)，不作为错题单词存入数据库
+        is_sentence = len(primary_word.split()) > 4 or len(primary_word) > 30
         item_type = "phrase" if " " in primary_word else "word"
         
         if is_correct:
             correct_count += 1
             st.success(f"✅ 你的答案: {u_ans} (正确) | 参考答案: {raw_c_ans}")
-            mastered_words_to_update.append(primary_word)
+            # 如果不是长句翻译，记录为已掌握单词
+            if not is_sentence:
+                mastered_words_to_update.append(primary_word)
         else:
             st.error(f"❌ 你的答案: {u_ans if u_ans else '未作答'} | 正确答案: {raw_c_ans}")
-            wrong_words_to_save.append((primary_word, item_type))
+            # 如果不是长句翻译，才将其加入错题库的更新列表
+            if not is_sentence:
+                wrong_words_to_save.append((primary_word, item_type))
+            
             st.session_state.wrong_list.append(f"题型：[{q.get('category')}] 考点：{q.get('question')} | 正确答案：{raw_c_ans} | 错答：{u_ans}")
 
     st.markdown("---")
@@ -301,10 +309,14 @@ elif st.session_state.step == 4:
     if not st.session_state.vocab_plan:
         try:
             with st.spinner("正在按照 [7单词 + 3短语] 的严苛标准生成专属排版中，请稍候..."):
-                plan_vocab_data = st.session_state.vocab_data
                 
-                if not plan_vocab_data:
-                    plan_vocab_data = db_service.get_training_vocabulary("wrong_focus", db_service.get_recent_blacklisted_words(50))
+                # 👇 【核心修改】：收集本次测试用过的所有词汇，传给查库逻辑作为黑名单
+                current_test_words = []
+                if st.session_state.vocab_data:
+                    current_test_words = st.session_state.vocab_data.get("words", []) + st.session_state.vocab_data.get("phrases", [])
+                
+                # 动态抓取：错题库优先 (排查句子) + 新 Topic 补缺
+                plan_vocab_data = db_service.get_review_vocabulary(current_test_words)
                 
                 vocab_plan = generate_5day_vocab_plan(plan_vocab_data)
                 
