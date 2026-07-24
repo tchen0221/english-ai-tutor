@@ -2,12 +2,19 @@ import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
 import random
+import os
 
-# 1. 初始化并缓存数据库连接 (避免每次刷新网页都重新连接)
 @st.cache_resource
-def get_db_client() -> Client:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
+def get_db_client():
+    # 👇 优先读取 Sealos 环境变量
+    url = os.environ.get("SUPABASE_URL")
+    if not url:
+         url = st.secrets["SUPABASE_URL"]
+         
+    key = os.environ.get("SUPABASE_KEY")
+    if not key:
+         key = st.secrets["SUPABASE_KEY"]
+         
     return create_client(url, key)
 
 db = get_db_client()
