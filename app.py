@@ -1,5 +1,6 @@
 import streamlit as st
-from ai_service import generate_diagnostic_quiz, generate_5day_vocab_plan, generate_diagnostic_report
+# 提前为你预留了分模块的引入，等一会儿修改 ai_service.py 时我们会实现这三个新函数
+from ai_service import generate_module_1, generate_module_2, generate_module_3, generate_5day_vocab_plan, generate_diagnostic_report
 import db_service  # 引入新建立的数据库大管家
 import re
 
@@ -21,6 +22,8 @@ if "vocab_plan" not in st.session_state:
     st.session_state.vocab_plan = None
 if "vocab_data" not in st.session_state:
     st.session_state.vocab_data = None # 用于存储当前生成的 50 个考点词汇
+if "current_page" not in st.session_state:
+    st.session_state.current_page = 1  # 新增：用于控制 Step 2 的模块闯关进度
 
 # ---------------- 侧边栏：词汇表中心 (Vocab Plan Center) ----------------
 with st.sidebar:
@@ -107,7 +110,7 @@ if st.session_state.step == 1:
             )
 
     if st.button("🚀 生成 AI 专属测试卷", use_container_width=True):
-        with st.spinner("正在联动数据库调取精选词汇，AI 正在努力编撰考卷中..."):
+        with st.spinner("正在联动数据库调取精选词汇，AI 正在努力编撰考卷中（分模块生成中）..."):
             # 1. 获取防重黑名单
             blacklist = db_service.get_recent_blacklisted_words(limit=50)
             
@@ -119,8 +122,25 @@ if st.session_state.step == 1:
             else:
                 st.session_state.vocab_data = db_service.get_vocab_plan_by_id(train_plan_id)
             
-            # 3. 将抓取的专属词库发给 AI 出题
-            st.session_state.quiz_data = generate_diagnostic_quiz(st.session_state.vocab_data)
+            # 【核心架构更新】：物理切分词库，切断泄题可能
+            words = st.session_state.vocab_data.get("words", [])
+            phrases = st.session_state.vocab_data.get("phrases", [])
+            
+            chunk_a = {"words": words[:15], "phrases": []}
+            chunk_b = {"words": words[15:25], "phrases": phrases[:10]}
+            chunk_c = {"words": words[25:35], "phrases": phrases[10:15]}
+            
+            # 3. 发送给3个独立接口生成题目
+            mod1 = generate_module_1(chunk_a)
+            mod2 = generate_module_2(chunk_b)
+            mod3 = generate_module_3(chunk_c)
+            
+            # 4. 合并试卷并重新编排 ID，使之依然是一个完整的试卷
+            all_questions = mod1.get("questions", []) + mod2.get("questions", []) + mod3.get("questions", [])
+            for i, q in enumerate(all_questions, 1):
+                q["id"] = str(i)
+                
+            st.session_state.quiz_data = {"questions": all_questions}
             
             # 状态重置与推进
             st.session_state.user_answers = {}
@@ -128,17 +148,32 @@ if st.session_state.step == 1:
             st.session_state.test_id = None
             st.session_state.vocab_plan = None
             st.session_state.step = 2
+            st.session_state.current_page = 1 # 从模块一开始
             st.rerun()
 
-# ---------------- Step 2: 在线测试答题 ----------------
+# ---------------- Step 2: 在线测试答题 (分模块展示) ----------------
 elif st.session_state.step == 2:
     st.header("Step 2: AI 诊断测试")
     st.info("💡 提示：完形填空和短文填空已拆分为独立的小题，请直接在题目下方输入或选择对应答案。")
-    quiz = st.session_state.quiz_data
     
-    for q in quiz.get("questions", []):
+    quiz = st.session_state.quiz_data
+    questions = quiz.get("questions", [])
+    
+    # 假分页逻辑：根据 current_page 提取对应的题目切片
+    if st.session_state.current_page == 1:
+        st.subheader("🚩 第一关：词汇识记 (第 1 - 10 题)")
+        current_qs = questions[0:10]
+    elif st.session_state.current_page == 2:
+        st.subheader("🚩 第二关：语法与搭配 (第 11 - 22 题)")
+        current_qs = questions[10:22]
+    else:
+        st.subheader("🚩 第三关：语篇综合实战 (第 23 - 32 题)")
+        current_qs = questions[22:32]
+
+    # 渲染当前模块的题目
+    for q in current_qs:
         st.markdown("---")
-        st.subheader(f"题目 {q.get('id', '*')} ({q.get('category', '未知')})")
+        st.markdown(f"**题目 {q.get('id', '*')} ({q.get('category', '未知')})**")
         
         if q.get("context"):
             st.info(q["context"])
@@ -147,13 +182,41 @@ elif st.session_state.step == 2:
         
         if q.get("type") == "radio":
             options = q.get("options", ["A", "B", "C", "D"])
-            st.session_state.user_answers[q["id"]] = st.radio("请选择正确答案：", options, key=f"q_{q['id']}", index=None)
+            # 保留用户的历史选择
+            saved_val = st.session_state.user_answers.get(q["id"])
+            idx = options.index(saved_val) if saved_val in options else None
+            st.session_state.user_answers[q["id"]] = st.radio("请选择正确答案：", options, key=f"q_{q['id']}", index=idx)
         else:
-            st.session_state.user_answers[q["id"]] = st.text_input(f"请输入答案：", key=f"q_{q['id']}")
+            saved_val = st.session_state.user_answers.get(q["id"], "")
+            st.session_state.user_answers[q["id"]] = st.text_input(f"请输入答案：", value=saved_val, key=f"q_{q['id']}")
     
-    if st.button("📝 交卷并获取诊断报告", type="primary", use_container_width=True):
-        st.session_state.step = 3
-        st.rerun()
+    st.markdown("---")
+    
+    # 底部导航按钮组件
+    col1, col2 = st.columns(2)
+    if st.session_state.current_page == 1:
+        with col2:
+            if st.button("下一步：前往模块二 ➡️", use_container_width=True):
+                st.session_state.current_page = 2
+                st.rerun()
+    elif st.session_state.current_page == 2:
+        with col1:
+            if st.button("⬅️ 返回修改模块一", use_container_width=True):
+                st.session_state.current_page = 1
+                st.rerun()
+        with col2:
+            if st.button("下一步：前往模块三 ➡️", use_container_width=True):
+                st.session_state.current_page = 3
+                st.rerun()
+    elif st.session_state.current_page == 3:
+        with col1:
+            if st.button("⬅️ 返回修改模块二", use_container_width=True):
+                st.session_state.current_page = 2
+                st.rerun()
+        with col2:
+            if st.button("📝 提交全卷并获取诊断报告", type="primary", use_container_width=True):
+                st.session_state.step = 3
+                st.rerun()
 
 # ---------------- Step 3: 对答案、诊断与错题闭环 ----------------
 elif st.session_state.step == 3:
@@ -163,7 +226,7 @@ elif st.session_state.step == 3:
     correct_count = 0
     total_count = len(quiz.get("questions", []))
 
-    st.subheader("📝 答案核对")
+    st.subheader("📝 答案核提")
     
     mastered_words_to_update = []
     wrong_words_to_save = []
@@ -175,7 +238,6 @@ elif st.session_state.step == 3:
         u_ans = str(st.session_state.user_answers.get(q["id"], "")).strip()
         raw_c_ans = str(q.get("correct_answer", "")).strip(" .,!?")
         
-        import re
         acceptable_answers = [a.strip().lower() for a in re.split(r'[/,，、]', raw_c_ans) if a.strip()]
         u_ans_clean = u_ans.lower()
         
@@ -204,8 +266,6 @@ elif st.session_state.step == 3:
         report_data = generate_diagnostic_report(st.session_state.wrong_list, correct_count, total_count)
         st.info(report_data.get("report", "报告生成完成。"))
         
-        # 【核心修复】：将错题录入严格包裹在 test_id 首次生成的作用域内！
-        # 这样保证只在刚交卷时写入一次数据库，进入 Step 4 时绝对不会再次触发报错。
         if not st.session_state.test_id:
             st.session_state.test_id = db_service.save_test_record(
                 grade="初中通用", score=0, difficulty="自适应模式",
@@ -234,10 +294,8 @@ elif st.session_state.step == 4:
     if not st.session_state.vocab_plan:
         try:
             with st.spinner("正在按照 [7单词 + 3短语] 的严苛标准生成专属排版中，请稍候..."):
-                # 注意：这里我们使用刚才在 Step 1 抓好并考查过的 50 个核心词汇发给 AI 生成复习排版
                 plan_vocab_data = st.session_state.vocab_data
                 
-                # 如果因为某种原因没抓到，触发紧急补救抓取
                 if not plan_vocab_data:
                     plan_vocab_data = db_service.get_training_vocabulary("wrong_focus", db_service.get_recent_blacklisted_words(50))
                 
@@ -257,7 +315,6 @@ elif st.session_state.step == 4:
                 st.rerun()
             st.stop()
 
-    # 此处利用 datetime 动态获取当前时间展示给用户看 (仅前端展示，数据库有真正的 created_at)
     from datetime import datetime
     current_time_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     
@@ -268,7 +325,6 @@ elif st.session_state.step == 4:
     for day, items in plan.items():
         with st.expander(f"📅 {day} 学习任务", expanded=True):
             for item in items:
-                # 区分词汇和短语的不同展示，强制维持原格式！
                 item_type = "📘 单词" if item.get("type") == "word" else "📙 短语"
                 st.markdown(f"### {item_type}：**{item.get('word', '')}** {item.get('pronunciation', '')} `[{item.get('pos', '')}]` {item.get('meaning', '')}")
                 
@@ -287,4 +343,5 @@ elif st.session_state.step == 4:
         st.session_state.vocab_plan = None
         st.session_state.test_id = None
         st.session_state.vocab_data = None
+        st.session_state.current_page = 1 # 重置进度
         st.rerun()
