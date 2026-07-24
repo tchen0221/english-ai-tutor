@@ -93,41 +93,60 @@ def generate_module_1(vocab_data):
         return {"questions": []}
 
 # ==============================================================================
-# 模块二：语法与搭配关 (12 题)
+# 模块二：语法与搭配关 (12 题) - 防多解严谨版
 # ==============================================================================
 def generate_module_2(vocab_data):
     words_str = ", ".join(vocab_data.get("words", []))
     phrases_str = ", ".join(vocab_data.get("phrases", []))
     
     prompt = f"""
-    你是一位资深且严格遵循中考英语出题考核标准的教研专家。请基于我提供的【专属核心词库】，设计一张【模块二：语法与短语测试卷】。
+    你是一位资深且严格遵循中国福建中考英语出题标准的教研专家。请基于我提供的【专属核心词库】，设计一张【模块二：语法与短语测试卷】。
     
     【出题最高限制指令：限定弹药库】
-    本次测试的所有考点必须且只能从以下提供的词汇和短语中挑选：
+    本次测试的所有考点必须且只能从以下词汇和短语中挑选：
     - 核心单词 (Words): [{words_str}]
     - 核心短语 (Phrases): [{phrases_str}]
-    绝对不允许考查上述列表之外的词汇作为重点！
 
-    【题型与数量严格要求（共计 12 题，绝不可多出或少出）】：
-    1. [词汇变形] 5题（给出原词，要求写出名词/形容词等变体，从单词库抽取）。
-    2. [固定搭配] 5题（短语挖空，如 pay attention ___，优先从短语库抽取）。
-    3. [翻译句子] 2题（中译英，考核写作能力，强制融入提供的短语）。
+    【题型与数量严格要求（共 12 题，绝不可多出或少出）】：
+    
+    1. [单句词汇变形] 5题（必须从单词库中抽取并考查其变形）。
+       - ⚠️ 致命规范：严禁只给出原词！必须提供一个完整的英文微语境单句，将要变形的单词原形放在括号内。
+       - 示例："question": "We had a wonderful ______ (celebrate) yesterday." -> 答案: "celebration"
+
+    2. [固定搭配挖空] 5题（必须从短语库中抽取）。
+       - ⚠️ 致命规范：为了避免多解，必须在题干前提供【中文释义】，再给出带空格的短语！只能挖去介词、连词或冠词。
+       - 示例："question": "保护...免受...：protect ... ______" -> 答案: "from"
+
+    3. [句子翻译] 2题（中译英，必须强制考核短语库中的核心短语）。
+       - ⚠️ 致命规范：给出完整的中文句子，并在括号内提示需要使用的短语，防止学生写出其他同义表达。
+       - 示例："question": "我们应该保护环境。(提示: protect the environment)" -> 答案: "We should protect the environment."
 
     【阅卷强约束：答案纯净度】(极其重要！)
     JSON 中的 `correct_answer` 字段必须且只能包含最终供程序比对的纯文本答案！
-    如果是词汇变形或挖空，直接填目标词。如果是句子翻译，可以保留基础的标点。
-    绝对不能包含选项字母(如A/B/C)或多余的解析说明。
+    如果是翻译题存在缩写差异（如 He is / He's），请用斜杠 '/' 隔开提供多解。绝对不能包含任何标点符号(除翻译题的句末标点外)或解析说明。
 
     【输出JSON结构要求】：
-    请将 12 道题平铺为一维的 "questions" 数组，type 全部为 "text"。
-    必须严格输出以下 JSON 格式示例：
+    请将 12 道题平铺为一个一维的 "questions" 数组。
+    必须严格输出以下 JSON 格式：
     {{
         "questions": [
             {{
                 "category": "词汇变形",
                 "type": "text",
-                "question": "care (adj.)",
+                "question": "He is a very ______ (care) person.",
                 "correct_answer": "careful"
+            }},
+            {{
+                "category": "固定搭配",
+                "type": "text",
+                "question": "查明；弄清 (find ______)",
+                "correct_answer": "out"
+            }},
+            {{
+                "category": "翻译句子",
+                "type": "text",
+                "question": "他习惯于早起。(提示: be used to)",
+                "correct_answer": "He is used to getting up early./He's used to getting up early."
             }}
         ]
     }}
@@ -206,7 +225,7 @@ def generate_module_3(vocab_data):
         return _call_deepseek_with_retry(prompt)
 
     # ==========================================
-    # 多线程并行调用 (核心优化点：提速 50% 以上)
+    # 多线程并行调用与防重复渲染组装
     # ==========================================
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -218,25 +237,27 @@ def generate_module_3(vocab_data):
             
         final_questions = []
 
-        # 组装前端需要的 完形填空 格式
+        # 组装完形填空 (只在第 1 题展示文章)
         if cloze_data and "questions" in cloze_data:
-            for q in cloze_data["questions"]:
+            for i, q in enumerate(cloze_data["questions"]):
                 final_questions.append({
                     "category": "完形填空",
                     "type": "radio",
-                    "context": cloze_data.get("passage", ""),
+                    # 关键修改：只在首题展示 context，其余题目的 context 为空字符串
+                    "context": cloze_data.get("passage", "") if i == 0 else "",
                     "question": f"第 {q['id']} 处填空",
                     "options": q.get("options", []),
                     "correct_answer": q.get("answer", "")
                 })
 
-        # 组装前端需要的 短文填空 格式
+        # 组装短文填空 (只在第 1 题展示文章)
         if short_data and "questions" in short_data:
-            for q in short_data["questions"]:
+            for i, q in enumerate(short_data["questions"]):
                 final_questions.append({
                     "category": "短文填空",
                     "type": "text",
-                    "context": short_data.get("passage", ""),
+                    # 关键修改：只在首题展示 context，其余题目的 context 为空字符串
+                    "context": short_data.get("passage", "") if i == 0 else "",
                     "question": f"第 {q['id']} 处填空",
                     "correct_answer": q.get("answer", "")
                 })
