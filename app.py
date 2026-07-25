@@ -2,7 +2,7 @@ import streamlit as st
 from ai_service import generate_module_1, generate_module_2, generate_module_3, generate_5day_vocab_plan, generate_diagnostic_report
 import db_service  # 引入新建立的数据库
 import re
-import concurrent.futures
+import time
 
 st.set_page_config(page_title="AI 英语智能辅导", page_icon="🎓", layout="wide")
 st.title("🎓 英语 AI 智能诊断与自适应提分系统")
@@ -130,20 +130,22 @@ if st.session_state.step == 1:
             chunk_b = {"words": words[15:25], "phrases": phrases[:10]}
             chunk_c = {"words": words[25:35], "phrases": phrases[10:15]}
             
-            # 3. 引入多线程并发机制，三间独立小黑屋同时向 AI 派发任务（速度提升 3 倍！）        
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                # 同时提交三个互相绝缘的生成任务
-                future1 = executor.submit(generate_module_1, chunk_a)
-                future2 = executor.submit(generate_module_2, chunk_b)
-                future3 = executor.submit(generate_module_3, chunk_c)
-                
-                # 统一回收结果（只等待最慢的那一个，整体耗时将被压缩到 ~40-50 秒）
-                mod1 = future1.result()
-                mod2 = future2.result()
-                mod3 = future3.result()
+            # 3. 模块化顺序排队生成（防止触发 DeepSeek 并发熔断机制） 
+            # 顺序请求
+            mod1 = generate_module_1(chunk_a)
+            time.sleep(2) # 缓冲2秒，防止请求过密
+            mod2 = generate_module_2(chunk_b)
+            time.sleep(2)
+            mod3 = generate_module_3(chunk_c)
             
-            # 4. 合并试卷并重新编排 ID，使之依然是一个完整的试卷
+            # 4. 合并试卷并重新编排 ID
             all_questions = mod1.get("questions", []) + mod2.get("questions", []) + mod3.get("questions", [])
+            
+            # 👇 【新增拦截护城河】：如果没出够题，直接报错并停止运行，不要进入无题目的 Step 2
+            if not all_questions or len(all_questions) < 10:
+                st.error("⚠️ AI 接口返回数据为空或触发了并发限制。请检查 Sealos 后台控制台报错，或稍后重试！")
+                st.stop()
+                
             for i, q in enumerate(all_questions, 1):
                 q["id"] = str(i)
                 
