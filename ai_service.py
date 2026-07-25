@@ -1,6 +1,7 @@
 import json
 import re
 import os
+import time
 import streamlit as st
 from openai import OpenAI
 import concurrent.futures
@@ -51,8 +52,10 @@ def _call_deepseek_with_retry(prompt, max_retries=3):
             return _extract_json(content)
         
         except Exception as e:
+            print(f"DeepSeek 请求失败 (尝试 {attempt+1}/{max_retries}): {e}") # 👈 把报错打在后台方便追踪
             if attempt == max_retries - 1:
                 raise Exception(f"已重试 {max_retries} 次。最后一次报错: {str(e)}")
+            time.sleep(3) # 👈 失败后强制休息 3 秒再重试，大概率能绕过频控限制
     return None
 
 # ==============================================================================
