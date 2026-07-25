@@ -40,7 +40,7 @@ def _call_deepseek_with_retry(prompt, max_retries=3):
     for attempt in range(max_retries):
         try:
             response = client.chat.completions.create(
-                model="deepseek-v4-pro", 
+                model="deepseek-v4-flash", 
                 messages=[{"role": "user", "content": prompt}],
                 timeout=120 
             )
