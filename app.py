@@ -360,7 +360,18 @@ elif view_selection == "📓 我的错题本":
                 col1, col2 = st.columns([5, 2])
                 with col1:
                     item_type = "📘 单词" if item.get("type") == "word" else "📙 短语"
-                    st.markdown(f"**{item_type}**: &nbsp;`{item.get('word')}`")
+                    
+                    # 👇 核心新增：提取 error_count，并根据错误次数渲染不同级别的警告徽章
+                    err_cnt = item.get("error_count") or 1 
+                    if err_cnt >= 3:
+                        badge = f"🔥🔥 核心痛点: 错 {err_cnt} 次"
+                    elif err_cnt == 2:
+                        badge = f"🔥 高频易错: 错 2 次"
+                    else:
+                        badge = f"⚠️ 犯错 1 次"
+                        
+                    st.markdown(f"**{item_type}**: &nbsp;`{item.get('word')}` &nbsp;&nbsp; **`{badge}`**")
+                    
                 with col2:
                     # 按钮带有独立的 key 确保操作不会冲突
                     if st.button("✅ 标记为已掌握", key=f"master_{item['id']}", use_container_width=True):
