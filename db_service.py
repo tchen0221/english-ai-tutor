@@ -141,26 +141,32 @@ def get_training_vocabulary(mode="fresh", blacklist=None):
         "phrases": selected_phrases
     }
 
-# 7. 【修改】错题写入机制：新增 test_id 绑定，支持级联删除
+# 7. 【修改】错题写入机制：引入 error_count 进行错误频次累加
 def save_wrong_question(test_id, word, item_type="word"):
     try:
-        # 先查存不存在
-        existing = db.table("wrong_questions").select("id, status").eq("word", word).execute()
+        # 先查存不存在，同时抓取当前的 error_count
+        existing = db.table("wrong_questions").select("id, status, error_count").eq("word", word).execute()
         if not existing.data:
-            # 没存过，直接写入未掌握，并绑定本次测试卷的 test_id
+            # 没存过，直接写入未掌握，并赋予初始错误次数 1
             db.table("wrong_questions").insert({
                 "test_id": test_id,
                 "word": word, 
                 "type": item_type, 
-                "status": "unmastered"
+                "status": "unmastered",
+                "error_count": 1
             }).execute()
         else:
-            # 存过但之前做对了(mastered)，重新打回未掌握(unmastered)
-            if existing.data[0]["status"] == "mastered":
-                db.table("wrong_questions").update({
-                    "test_id": test_id, # 更新时关联到最新一次错的卷子
-                    "status": "unmastered"
-                }).eq("word", word).execute()
+            # 存过了，无论之前是 mastered 还是 unmastered，只要这次又错了，error_count 就 +1
+            current_record = existing.data[0]
+            # 兼容老数据（如果老数据没有 error_count 字段则默认为0再加1）
+            current_count = current_record.get("error_count") or 0
+            new_count = current_count + 1
+            
+            db.table("wrong_questions").update({
+                "test_id": test_id, # 更新时关联到最新一次错的卷子
+                "status": "unmastered", # 强制打回/保持未掌握状态
+                "error_count": new_count # 累加错误次数
+            }).eq("word", word).execute()
     except Exception as e:
         print(f"保存错题失败: {e}")
 
@@ -270,10 +276,11 @@ def get_review_vocabulary(current_test_words=None):
         "phrases": selected_phrases
     }
 
-# 13. 【新增】获取所有未掌握的错题列表，供“我的错题本”视图展示
+# 13. 【修改】获取所有未掌握的错题，支持 error_count 提取并实现【高频错题置顶】
 def get_unmastered_wrong_questions():
     try:
-        res = db.table("wrong_questions").select("id, word, type, created_at").eq("status", "unmastered").order("created_at", desc=True).execute()
+        # 新增抓取 error_count 字段，并优先按照 error_count 倒序（次数多的在最上面），次数相同的按时间倒序
+        res = db.table("wrong_questions").select("id, word, type, created_at, error_count").eq("status", "unmastered").order("error_count", desc=True).order("created_at", desc=True).execute()
         return res.data if res.data else []
     except Exception as e:
         print(f"获取错题本数据失败: {e}")
