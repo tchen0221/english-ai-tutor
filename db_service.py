@@ -269,3 +269,12 @@ def get_review_vocabulary(current_test_words=None):
         "words": selected_words,
         "phrases": selected_phrases
     }
+
+# 13. 【新增】获取所有未掌握的错题列表，供“我的错题本”视图展示
+def get_unmastered_wrong_questions():
+    try:
+        res = db.table("wrong_questions").select("id, word, type, created_at").eq("status", "unmastered").order("created_at", desc=True).execute()
+        return res.data if res.data else []
+    except Exception as e:
+        print(f"获取错题本数据失败: {e}")
+        return []
