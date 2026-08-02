@@ -142,14 +142,23 @@ if view_selection == "🏠 核心测试中心":
         st.header("Step 2: AI 诊断测试")
         st.info("💡 提示：完形填空和短文填空已拆分为独立的小题，请直接在题目下方输入或选择对应答案。")
         
-        # 👇 核心新增：随手记生词 UI 渲染 👇
+        # 👇 核心修改：双管齐下的移动端友好版生词捕获器 👇
         with st.expander("🧲 随手记生词捕获器 (遇到生词？一键收录错题本)", expanded=True):
-            st.text_input(
-                "在阅读文章时如果遇到超纲生词，在此输入或粘贴，按下【回车键】即可秒收录：",
-                key="spontaneous_word_input",
-                on_change=handle_spontaneous_word,
-                placeholder="例如输入 environment 并按回车..."
-            )
+            st.markdown("在阅读文章时如果遇到超纲生词，在此输入或粘贴：")
+            
+            # 使用 4:1 的比例进行左右排版，完美适配手机屏幕
+            col_in, col_btn = st.columns([4, 1])
+            with col_in:
+                st.text_input(
+                    "生词",
+                    key="spontaneous_word_input",
+                    on_change=handle_spontaneous_word,
+                    placeholder="例如输入 environment...",
+                    label_visibility="collapsed" # 隐藏多余的标签以对齐按钮
+                )
+            with col_btn:
+                # 按钮绑定相同的回调函数
+                st.button("📥 立即收录", on_click=handle_spontaneous_word, use_container_width=True)
         # 👆 新增结束 👆
 
         quiz = st.session_state.quiz_data
