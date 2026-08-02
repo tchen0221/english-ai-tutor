@@ -25,6 +25,18 @@ if "vocab_data" not in st.session_state:
 if "current_page" not in st.session_state:
     st.session_state.current_page = 1  # 新增：用于控制 Step 2 的模块闯关进度
 
+# 👇 核心新增：定义随手记生词的回调函数 👇
+def handle_spontaneous_word():
+    # 从 session_state 中安全获取输入的值
+    word = st.session_state.get("spontaneous_word_input", "").strip()
+    if word:
+        # 调用 db_service 中的新接口静默写入
+        db_service.add_spontaneous_word(word)
+        st.toast(f"✅ 已成功将【{word}】收入错题本！", icon="🧲")
+        # 清空输入框，准备迎接下一个生词
+        st.session_state.spontaneous_word_input = ""
+# 👆 新增结束 👆
+
 # 提前拉取历史词汇表列表，因为不仅侧边栏需要，第一关的“历史词汇表特训”模式也需要它
 history_list = db_service.get_vocab_plan_history_list()
 
@@ -130,6 +142,16 @@ if view_selection == "🏠 核心测试中心":
         st.header("Step 2: AI 诊断测试")
         st.info("💡 提示：完形填空和短文填空已拆分为独立的小题，请直接在题目下方输入或选择对应答案。")
         
+        # 👇 核心新增：随手记生词 UI 渲染 👇
+        with st.expander("🧲 随手记生词捕获器 (遇到生词？一键收录错题本)", expanded=True):
+            st.text_input(
+                "在阅读文章时如果遇到超纲生词，在此输入或粘贴，按下【回车键】即可秒收录：",
+                key="spontaneous_word_input",
+                on_change=handle_spontaneous_word,
+                placeholder="例如输入 environment 并按回车..."
+            )
+        # 👆 新增结束 👆
+
         quiz = st.session_state.quiz_data
         questions = quiz.get("questions", [])
         
