@@ -25,18 +25,6 @@ if "vocab_data" not in st.session_state:
 if "current_page" not in st.session_state:
     st.session_state.current_page = 1  # 新增：用于控制 Step 2 的模块闯关进度
 
-# 👇 核心新增：定义随手记生词的回调函数 👇
-def handle_spontaneous_word():
-    # 从 session_state 中安全获取输入的值
-    word = st.session_state.get("spontaneous_word_input", "").strip()
-    if word:
-        # 调用 db_service 中的新接口静默写入
-        db_service.add_spontaneous_word(word)
-        st.toast(f"✅ 已成功将【{word}】收入错题本！", icon="🧲")
-        # 清空输入框，准备迎接下一个生词
-        st.session_state.spontaneous_word_input = ""
-# 👆 新增结束 👆
-
 # 提前拉取历史词汇表列表，因为不仅侧边栏需要，第一关的“历史词汇表特训”模式也需要它
 history_list = db_service.get_vocab_plan_history_list()
 
@@ -142,24 +130,28 @@ if view_selection == "🏠 核心测试中心":
         st.header("Step 2: AI 诊断测试")
         st.info("💡 提示：完形填空和短文填空已拆分为独立的小题，请直接在题目下方输入或选择对应答案。")
         
-        # 👇 核心修改：双管齐下的移动端友好版生词捕获器 👇
+        # 👇 核心优化：采用 st.form 表单容器，彻底解决双击录入两次的 Bug，完美支持手机点击与电脑回车 👇
         with st.expander("🧲 随手记生词捕获器 (遇到生词？一键收录错题本)", expanded=True):
-            st.markdown("在阅读文章时如果遇到超纲生词，在此输入或粘贴：")
-            
-            # 使用 4:1 的比例进行左右排版，完美适配手机屏幕
-            col_in, col_btn = st.columns([4, 1])
-            with col_in:
-                st.text_input(
-                    "生词",
-                    key="spontaneous_word_input",
-                    on_change=handle_spontaneous_word,
-                    placeholder="例如输入 environment...",
-                    label_visibility="collapsed" # 隐藏多余的标签以对齐按钮
-                )
-            with col_btn:
-                # 按钮绑定相同的回调函数
-                st.button("📥 立即收录", on_click=handle_spontaneous_word, use_container_width=True)
-        # 👆 新增结束 👆
+            with st.form(key="spontaneous_word_form", clear_on_submit=True):
+                st.markdown("在阅读文章时如果遇到超纲生词，在此输入或粘贴：")
+                col_in, col_btn = st.columns([4, 1])
+                with col_in:
+                    word_input = st.text_input(
+                        "生词",
+                        placeholder="例如输入 environment...",
+                        label_visibility="collapsed"
+                    )
+                with col_btn:
+                    submitted = st.form_submit_button("📥 立即收录", use_container_width=True)
+                
+                if submitted:
+                    word = word_input.strip()
+                    if word:
+                        db_service.add_spontaneous_word(word)
+                        st.toast(f"✅ 已成功将【{word}】收入错题本！", icon="🧲")
+                    else:
+                        st.warning("⚠️ 请先输入有效的单词或短语！")
+        # 👆 优化结束 👆
 
         quiz = st.session_state.quiz_data
         questions = quiz.get("questions", [])
@@ -392,7 +384,7 @@ elif view_selection == "📓 我的错题本":
                 with col1:
                     item_type = "📘 单词" if item.get("type") == "word" else "📙 短语"
                     
-                    # 👇 核心新增：提取 error_count，并根据错误次数渲染不同级别的警告徽章
+                    # 👇 提取 error_count，并根据错误次数渲染不同级别的警告徽章
                     err_cnt = item.get("error_count") or 1 
                     if err_cnt >= 3:
                         badge = f"🔥🔥 核心痛点: 错 {err_cnt} 次"
