@@ -285,3 +285,37 @@ def get_unmastered_wrong_questions():
     except Exception as e:
         print(f"获取错题本数据失败: {e}")
         return []
+
+# 14. 【新增】随手记生词捕获器：处理用户在前端主动输入的生词收录
+def add_spontaneous_word(word):
+    word = word.strip()
+    if not word:
+        return
+        
+    # 简单通过是否含有空格来判定是单词还是短语
+    item_type = "phrase" if " " in word else "word"
+    
+    try:
+        # 查询该词是否已经在数据库中（无论 mastered 还是 unmastered）
+        existing = db.table("wrong_questions").select("id, status, error_count").eq("word", word).execute()
+        
+        if not existing.data:
+            # 库中完全没有，作为全新生词插入 (此时不绑定 test_id，让其默认为 NULL)
+            db.table("wrong_questions").insert({
+                "word": word, 
+                "type": item_type, 
+                "status": "unmastered",
+                "error_count": 1
+            }).execute()
+        else:
+            # 库中已有该词，完美复用刚刚设计的频次和闭环系统
+            current_record = existing.data[0]
+            current_count = current_record.get("error_count") or 0
+            
+            db.table("wrong_questions").update({
+                "status": "unmastered",      # 如果以前背过(mastered)，现在遇到又忘了，强制打回未掌握
+                "error_count": current_count + 1 # 错误/遗忘频次累加
+            }).eq("word", word).execute()
+            
+    except Exception as e:
+        print(f"主动收录生词失败: {e}")
